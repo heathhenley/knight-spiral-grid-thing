@@ -1,3 +1,5 @@
+import { flatIndexToTopLeftRef } from './coords.ts';
+
 export type Piece = {
   type: 'knight';
   // the delta is how to derive it's moves, so [2, 1] means it can go:
@@ -18,17 +20,6 @@ export type EngineConfig = {
   gridSize: number;
   placementsPerFrame: number;
   pieces: Piece[];
-}
-
-function toFlatIndex(x: number, y: number, gridSize: number) {
-  return x * gridSize + y;
-}
-
-function to2dIndex(idx: number, gridSize: number) {
-  return {
-    x: idx % gridSize,
-    y: Math.floor(idx / gridSize),
-  };
 }
 
 
@@ -57,10 +48,13 @@ function drawDebugGrid({
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   cells.forEach((cell, idx) => {
-    const { x, y } = to2dIndex(idx, gridSize);
-    const px = x * cellWidth + cellWidth / 2;
-    const py = y * cellHeight + cellHeight / 2;
-    ctx.fillText(String(cell), px, py);
+    const { x, y } = flatIndexToTopLeftRef(idx, gridSize);
+    const [tl_x, tl_y] = [x * cellWidth, y * cellHeight];
+    const cx = tl_x + cellWidth / 2;
+    const cy = tl_y + cellHeight / 2;
+    ctx.fillText(String(cell), cx, cy);
+    // add a border to the cell
+    ctx.strokeRect(tl_x, tl_y, cellWidth, cellHeight);
   });
 }
 
