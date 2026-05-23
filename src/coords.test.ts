@@ -3,7 +3,10 @@ import { describe, it, expect } from 'vitest';
 import {
   topLeftRefToFlatIndex,
   flatIndexToTopLeftRef,
+  flatIndexToCenterRef,
   topLeftRefToCenterRef,
+  centerRefToSpiralRef,
+  spiralRefToCenterRef,
 } from './coords.ts';
 
 
@@ -67,4 +70,30 @@ describe('flatIndexToTopLeftRef and topLeftRefToFlatIndex', () => {
     }
   });
 
+});
+
+describe('centerRefToSpiralRef', () => {
+  it('maps (0, 0) to 0', () => {
+    expect(centerRefToSpiralRef({ x: 0, y: 0 })).toBe(0);
+  });
+
+  it('maps (-2, 1) to 17', () => {
+    expect(centerRefToSpiralRef({ x: -2, y: 1 })).toBe(17);
+  });
+
+  it('maps (-5, -5) to 110', () => {
+    expect(centerRefToSpiralRef({ x: -5, y: -5 })).toBe(110);
+  });
+
+});
+
+describe('spiralRefToCenterRef and centerRefToSpiralRef and flatIndexToCenterRef', () => {
+  it('check conversion back and forth for a 10x10 grid', () => {
+    for (let i = 0; i < 100; i++) {
+      const centerRef = flatIndexToCenterRef(i, 10);
+      const spiralIndex = centerRefToSpiralRef(centerRef);
+      const centerRef2 = spiralRefToCenterRef(spiralIndex);
+      expect(centerRef2).toEqual(centerRef);
+    }
+  });
 });

@@ -23,6 +23,20 @@ export function flatIndexToCenterRef(idx: number, gridSize: number): CenterRef {
   return topLeftRefToCenterRef(topLeftRef, gridSize);
 }
 
+export function centerRefToTopLeftRef({ x, y }: CenterRef, gridSize: number): TopLeftRef {
+  const centerX = Math.floor(gridSize / 2);
+  const centerY = Math.floor(gridSize / 2);
+  return {
+    x: x + centerX,
+    y: y + centerY,
+  };
+}
+
+export function centerRefToFlatIndex({ x, y }: CenterRef, gridSize: number): number {
+  const topLeftRef = centerRefToTopLeftRef({ x, y }, gridSize);
+  return topLeftRefToFlatIndex(topLeftRef, gridSize);
+}
+
 export function topLeftRefToCenterRef({ x, y }: TopLeftRef, gridSize: number): CenterRef {
   // The image / canvas and cells are indexed from (0, 0) being the top left, 
   // but we want to index from (0, 0) being the center.
@@ -35,4 +49,41 @@ export function topLeftRefToCenterRef({ x, y }: TopLeftRef, gridSize: number): C
     x: x - centerX,
     y: y - centerY,
   };
+}
+
+export function centerRefToSpiralRef({ x, y }: CenterRef): number {
+  const n = Math.max(Math.abs(x), Math.abs(y));
+  if (n === 0) return 0;
+  const base = (2 * n - 1) ** 2;
+  if (x === n && y >= 1 - n) {
+    return base + (y - (1 - n));
+  }
+  if (y === n && x >= -n) {
+    return base + 2 * n + (n - 1 - x);
+  }
+  if (x === -n && y >= -n) {
+    return base + 4 * n + (n - 1 - y);
+  }
+  return base + 6 * n + (x - (-n + 1));
+}
+
+/** Highest spiral index used by any cell on the grid. */
+export function maxSpiralIndexForGrid(gridSize: number): number {
+  let max = 0;
+  for (let idx = 0; idx < gridSize * gridSize; idx++) {
+    max = Math.max(max, centerRefToSpiralRef(flatIndexToCenterRef(idx, gridSize)));
+  }
+  return max;
+}
+
+export function spiralRefToCenterRef(idx: number): CenterRef {
+  if (idx === 0) return { x: 0, y: 0 };
+  const n = Math.ceil((Math.sqrt(idx + 1) - 1) / 2);
+  const base = (2 * n - 1) ** 2;
+  const offset = idx - base;
+
+  if (offset < 2 * n) return { x: n, y: 1 - n + offset };
+  if (offset < 4 * n) return { x: n - 1 - (offset - 2 * n), y: n };
+  if (offset < 6 * n) return { x: -n, y: n - 1 - (offset - 4 * n) };
+  return { x: -n + 1 + (offset - 6 * n), y: -n };
 }

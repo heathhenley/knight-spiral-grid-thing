@@ -1,10 +1,11 @@
 import { Engine } from './engine.ts';
 
 const engine = new Engine(document.getElementById('canvas') as HTMLCanvasElement, {
-  gridSize: 10,
-  placementsPerFrame: 1,
+  gridSize: 100,
+  framesPerPlacement: 1,
   pieces: [
-    { type: 'knight', delta: [2, 1], id: 0, color: 0x000000 },
+    { type: 'knight', delta: [2, 1], id: 1, color: 0x000000 },
+    { type: 'knight', delta: [2, 1], id: 2, color: 0x000000 },
   ],
 }, document.getElementById('debug-canvas') as HTMLCanvasElement);
 
