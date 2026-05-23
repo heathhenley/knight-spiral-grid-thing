@@ -1,37 +1,38 @@
 import { centerRefToSpiralRef, spiralRefToCenterRef, maxSpiralIndexForGrid, type CenterRef, centerRefToFlatIndex } from './coords.ts';
 
 const PIXEL_SHADER_WGSL = /* wgsl */ `
-struct Uniforms {
-  canvasWidth: f32,
-  canvasHeight: f32,
-  pixelWidth: f32,
-  pixelHeight: f32,
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
 }
 
-@group(0) @binding(0) var<uniform> uniforms: Uniforms;
-@group(0) @binding(1) var pixels: texture_2d<f32>;
-@group(0) @binding(2) var pixelSampler: sampler;
+@group(0) @binding(0) var pixels: texture_2d<f32>;
+@group(0) @binding(1) var pixelSampler: sampler;
 
 @vertex
-fn vs(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+fn vs(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
   let pos = array(
     vec2f(-1.0, -1.0),
     vec2f( 3.0, -1.0),
     vec2f(-1.0,  3.0),
   );
-  return vec4f(pos[vertexIndex], 0.0, 1.0);
+
+  var out: VertexOut;
+  let vertexPos = pos[vertexIndex];
+  out.position = vec4f(vertexPos, 0.0, 1.0);
+  out.uv = vec2f(vertexPos.x * 0.5 + 0.5, 0.5 - vertexPos.y * 0.5);
+  return out;
 }
 
 @fragment
-fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  let uv = pos.xy / vec2f(uniforms.canvasWidth, uniforms.canvasHeight);
-  return textureSample(pixels, pixelSampler, uv);
+fn fs(in: VertexOut) -> @location(0) vec4f {
+  return textureSample(pixels, pixelSampler, in.uv);
 }
 `;
 
 const BACKGROUND_COLOR = 0x1a1a1a;
 
-function setCellColor(cells: Uint8Array<ArrayBuffer>, flatIndex: number, color: number) {
+function writeCellColor(cells: Uint8Array<ArrayBuffer>, flatIndex: number, color: number) {
   const offset = flatIndex * 4;
   cells[offset] = (color >> 16) & 0xff;
   cells[offset + 1] = (color >> 8) & 0xff;
@@ -56,7 +57,6 @@ export type EngineState = {
   placementsCompleted: number;
   pieceToPlaceNext: number;
   frameCount: number;
-  lastFrameTime: number;
   // the next index that each piece can access (not occupied by opponent pieces)
   // and not attacked by opponent pieces
   nextSpiralIndexPerPiece: Map<number, number>;
@@ -150,7 +150,6 @@ export class Engine {
   private canvasFormat!: GPUTextureFormat;
   private pixelTexture!: GPUTexture;
   private pixelSampler!: GPUSampler;
-  private uniformBuffer!: GPUBuffer;
   private bindGroup!: GPUBindGroup;
   private pipeline!: GPURenderPipeline;
   private uploadBuffer!: Uint8Array<ArrayBuffer>;
@@ -159,8 +158,9 @@ export class Engine {
   private state: EngineState;
   private config: EngineConfig;
 
-  // RGBA pixel colors, uploaded directly to the GPU each frame
+  // RGBA pixel colors; dirty rows are uploaded to the GPU before drawing.
   private cells!: Uint8Array<ArrayBuffer>;
+  private dirtyRows!: Uint8Array<ArrayBuffer>;
   // sim occupancy only — separate from color so background fills don't block placement
   private occupied!: Uint8Array<ArrayBuffer>;
 
@@ -171,7 +171,6 @@ export class Engine {
       placementsCompleted: 0,
       pieceToPlaceNext: 0,
       frameCount: 0,
-      lastFrameTime: 0,
       nextSpiralIndexPerPiece: new Map(),
       attackedByMap: new Map(),
       ended: false,
@@ -184,10 +183,11 @@ export class Engine {
 
   async initialize() {
     /* try to get a webgpu adapter */
-    this.adapter = await navigator.gpu.requestAdapter();
-    if (!this.adapter) {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
       throw new Error('No WebGPU adapter found');
     }
+    this.adapter = adapter;
     /* try to get a webgpu device */
     this.device = await this.adapter.requestDevice();
     if (!this.device) {
@@ -208,10 +208,12 @@ export class Engine {
     const pixelCount = gridSize * gridSize;
 
     this.cells = new Uint8Array(pixelCount * 4);
+    this.dirtyRows = new Uint8Array(gridSize);
     this.occupied = new Uint8Array(pixelCount);
     for (let i = 0; i < pixelCount; i++) {
-      setCellColor(this.cells, i, BACKGROUND_COLOR);
+      writeCellColor(this.cells, i, BACKGROUND_COLOR);
     }
+    this.dirtyRows.fill(1);
 
     this.rowBytes = alignedRowBytes(gridSize);
     this.uploadBuffer = new Uint8Array(this.rowBytes * gridSize);
@@ -236,26 +238,16 @@ export class Engine {
       minFilter: 'nearest',
     });
 
-    this.uniformBuffer = device.createBuffer({
-      size: 16,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
     const shaderModule = device.createShaderModule({ code: PIXEL_SHADER_WGSL });
     const bindGroupLayout = device.createBindGroupLayout({
       entries: [
         {
           binding: 0,
           visibility: GPUShaderStage.FRAGMENT,
-          buffer: { type: 'uniform' },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
         {
-          binding: 2,
+          binding: 1,
           visibility: GPUShaderStage.FRAGMENT,
           sampler: { type: 'filtering' },
         },
@@ -265,9 +257,8 @@ export class Engine {
     this.bindGroup = device.createBindGroup({
       layout: bindGroupLayout,
       entries: [
-        { binding: 0, resource: { buffer: this.uniformBuffer } },
-        { binding: 1, resource: this.pixelTexture.createView() },
-        { binding: 2, resource: this.pixelSampler },
+        { binding: 0, resource: this.pixelTexture.createView() },
+        { binding: 1, resource: this.pixelSampler },
       ],
     });
 
@@ -283,36 +274,64 @@ export class Engine {
     });
   }
 
-  private uploadPixels() {
+  private setCellColor(flatIndex: number, color: number) {
+    writeCellColor(this.cells, flatIndex, color);
+    this.dirtyRows[Math.floor(flatIndex / this.config.gridSize)] = 1;
+  }
+
+  private uploadRows(startRow: number, rowCount: number) {
     const { cells, rowBytes, uploadBuffer, config } = this;
     const gridSize = config.gridSize;
     const tightRowBytes = gridSize * 4;
 
     if (rowBytes === tightRowBytes) {
       this.device.queue.writeTexture(
-        { texture: this.pixelTexture },
-        cells,
-        { bytesPerRow: rowBytes, rowsPerImage: gridSize },
-        [gridSize, gridSize],
+        { texture: this.pixelTexture, origin: [0, startRow] },
+        cells.subarray(startRow * tightRowBytes, (startRow + rowCount) * tightRowBytes),
+        { bytesPerRow: rowBytes, rowsPerImage: rowCount },
+        [gridSize, rowCount],
       );
       return;
     }
 
-    for (let y = 0; y < gridSize; y++) {
+    for (let y = 0; y < rowCount; y++) {
+      const sourceRow = startRow + y;
       uploadBuffer.set(
-        cells.subarray(y * tightRowBytes, (y + 1) * tightRowBytes),
+        cells.subarray(sourceRow * tightRowBytes, (sourceRow + 1) * tightRowBytes),
         y * rowBytes,
       );
     }
     this.device.queue.writeTexture(
-      { texture: this.pixelTexture },
-      uploadBuffer,
-      { bytesPerRow: rowBytes, rowsPerImage: gridSize },
-      [gridSize, gridSize],
+      { texture: this.pixelTexture, origin: [0, startRow] },
+      uploadBuffer.subarray(0, rowBytes * rowCount),
+      { bytesPerRow: rowBytes, rowsPerImage: rowCount },
+      [gridSize, rowCount],
     );
   }
 
-  async update() {
+  private uploadPixels() {
+    const { dirtyRows } = this;
+    let row = 0;
+
+    while (row < dirtyRows.length) {
+      while (row < dirtyRows.length && dirtyRows[row] === 0) {
+        row++;
+      }
+
+      const startRow = row;
+      while (row < dirtyRows.length && dirtyRows[row] !== 0) {
+        row++;
+      }
+
+      if (row > startRow) {
+        this.uploadRows(startRow, row - startRow);
+      }
+    }
+
+    dirtyRows.fill(0);
+  }
+
+  update() {
     /* update the state */
     // each update will place one piece
     // 1. place it on the board at the next index for this piece
@@ -341,19 +360,13 @@ export class Engine {
       const pieceToPlaceNext = this.config.pieces[this.state.pieceToPlaceNext];
 
       // get the next index that this piece can access)
-      const nextSpiralIndex = this.state.nextSpiralIndexPerPiece.get(pieceToPlaceNext.id);
-
-      console.log(`nextSpiralIndex: ${nextSpiralIndex}`);
-      console.log(`pieceToPlaceNext: ${pieceToPlaceNext.id}`);
-      console.log(`pieceToPlaceNext: ${pieceToPlaceNext.type}`);
-      console.log(`pieceToPlaceNext delta: ${pieceToPlaceNext.delta}`);
-      console.log(`pieceToPlaceNext color: ${pieceToPlaceNext.color}`);
+      const nextSpiralIndex = this.state.nextSpiralIndexPerPiece.get(pieceToPlaceNext.id)!;
 
       // place the piece on this index
       // center ref
       const centerRef = spiralRefToCenterRef(nextSpiralIndex);
       const nextFlatIndex = centerRefToFlatIndex(centerRef, this.config.gridSize);
-      setCellColor(this.cells, nextFlatIndex, pieceToPlaceNext.color);
+      this.setCellColor(nextFlatIndex, pieceToPlaceNext.color);
       this.occupied[nextFlatIndex] = 1;
 
 
@@ -422,17 +435,7 @@ export class Engine {
     }
   }
 
-  async render() {
-    const { gridSize } = this.config;
-
-    const uniformData = new Float32Array([
-      this.canvas.width,
-      this.canvas.height,
-      gridSize,
-      gridSize,
-    ]);
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
-
+  render() {
     this.uploadPixels();
 
     const encoder = this.device.createCommandEncoder();
@@ -453,12 +456,12 @@ export class Engine {
 
   async start() {
     await this.initialize();
-    const loop = async () => {
-      await this.update(); // update the state (not implemented yet)
-      await this.render(); // render the state (not implemented yet)
-      this.requestAnimationFrameId = requestAnimationFrame(async () => await loop());
+    const loop = () => {
+      this.update();
+      this.render();
+      this.requestAnimationFrameId = requestAnimationFrame(loop);
     }
-    await loop();
+    loop();
   }
 
   async stop() {
