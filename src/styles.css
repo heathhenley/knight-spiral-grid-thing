@@ -6,7 +6,7 @@ html, body {
   height: 100vh;
 }
 
-#canvas, #debug-canvas {
+#canvas {
   position: absolute;
   top: 0;
   left: 0;
