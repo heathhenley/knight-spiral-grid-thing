@@ -1,0 +1,23 @@
+import { Engine } from './engine.ts';
+
+const engine = new Engine(document.getElementById('canvas') as HTMLCanvasElement, {
+  gridSize: 10,
+  placementsPerFrame: 1,
+  pieces: [
+    { type: 'knight', delta: [2, 1], id: 0, color: 0x000000 },
+  ],
+}, document.getElementById('debug-canvas') as HTMLCanvasElement);
+
+try {
+  await engine.start();
+  console.log('Engine initialized');
+} catch (error) {
+  console.error('Error initializing engine:', error);
+  document.body.innerHTML = `
+    <div style="">
+      <h1>Error initializing WebGPU engine</h1>
+      <p>Please check your browser's WebGPU support and try again.</p>
+      <p>${error.message}</p>
+    </div>
+  `;
+}
