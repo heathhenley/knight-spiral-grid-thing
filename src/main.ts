@@ -1,13 +1,28 @@
+import { makeNeighborsFunction, makeIsAttackedByFunction } from './pieces';
 import { Engine } from './engine.ts';
 
 const engine = new Engine(document.getElementById('canvas') as HTMLCanvasElement, {
   gridSize: 2048,
   placementsPerFrame: 10_000,
   pieces: [
-    { type: 'knight', delta: [2, 2], id: 1, color: 0xff3333 },
-    { type: 'knight', delta: [3, 0], id: 2, color: 0x3366ff },
-    //{ type: 'knight', delta: [3, 3], id: 3, color: 0x44aa00 },
-    //{ type: 'knight', delta: [7, 3], id: 4, color: 0x66ff00 },
+    {
+      id: 1,
+      color: 0xff3333,
+      getNeighbors: makeNeighborsFunction([2, 1]),
+      isAttackedBy: makeIsAttackedByFunction([2]),
+    },
+    {
+      id: 2,
+      color: 0x3366ff,
+      getNeighbors: makeNeighborsFunction([2, 1]),
+      isAttackedBy: makeIsAttackedByFunction([1]),
+    },
+    /*{
+      id: 3,
+      color: 0x44aa00,
+      getNeighbors: makeNeighborsFunction([2, 1]),
+      isAttackedBy: makeIsAttackedByFunction([1, 2]),
+    },*/
   ],
 });
 
@@ -19,8 +34,8 @@ try {
   console.error('Error initializing engine:', error);
   document.body.innerHTML = `
     <div style="">
-      <h1>Error initializing WebGPU engine</h1>
-      <p>Please check your browser's WebGPU support and try again.</p>
+      <h1>Error initializing engine</h1>
+      <p>Please check your browser's Canvas 2D support and try again.</p>
       <p>${message}</p>
     </div>
   `;
