@@ -13,8 +13,8 @@ a mathmetician I assume; you can regenerate the [images he posted here](https://
 I don't know why I made this other than I find the patterns that pop out really fascinating, the video blew my mind and I wanted to
 see what other cool designs could pop out.
 
-I wrote the engine just to feel something, but I vibe coded the controls and styling. Also used AI to get the closed form 2d
-center reference coords to spiral index.
+I wrote the engine just to feel something, but I vibe coded the controls and styling. Also used cursor to get the closed form 2d
+center reference coords to spiral index and vice versa.
 
 Here's a couple that I like:
 - [5 colors](https://heathhenley.dev/knight-spiral-grid-thing/?size=4096&pieces=5&moves=Knight%2CAntelope%2CKnight%2CSatrap%2CZebra&attacks=2%2C3%2C4%2C5%7C1%2C3%2C4%2C5%7C1%2C2%2C4%2C5%7C1%2C2%2C3%2C5%7C1%2C2%2C3%2C4&colors=ff3333%2C3366ff%2C44aa00%2Cffaa00%2Caa55ff)
