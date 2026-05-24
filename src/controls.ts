@@ -143,10 +143,6 @@ function writeFormConfigToUrl(config: FormConfig) {
   window.history.replaceState(null, '', `${window.location.pathname}?${params}${window.location.hash}`);
 }
 
-function getPieceCount(pieceCountInput: HTMLInputElement) {
-  return clampInteger(Number(pieceCountInput.value), MIN_PIECES, MAX_PIECES, DEFAULT_PIECES);
-}
-
 function readPieceFormConfig(pieceId: number, pieceCount: number): PieceFormConfig {
   const moveSelect = document.getElementById(`piece-${pieceId}-move`);
   const moveKey = moveSelect instanceof HTMLSelectElement && isPieceMoveKey(moveSelect.value)
@@ -208,45 +204,57 @@ export function createControls(): Controls {
         <h1>Simulation Controls</h1>
         <p>Shareable settings live in the URL.</p>
       </div>
+      <button
+        id="toggle-controls"
+        class="secondary-button"
+        type="button"
+        aria-expanded="true"
+        aria-controls="controls-body"
+      >
+        Hide
+      </button>
     </div>
-    <div class="control-grid">
-      <label>
-        <span>Board</span>
-        <input
-          id="grid-size"
-          type="number"
-          min="${MIN_GRID_SIZE}"
-          max="${MAX_GRID_SIZE}"
-          step="64"
-          value="${initialConfig.gridSize}"
-        >
-      </label>
-      <label>
-        <span>Pieces</span>
-        <input
-          id="piece-count"
-          type="number"
-          min="${MIN_PIECES}"
-          max="${MAX_PIECES}"
-          value="${initialConfig.pieces.length}"
-        >
-      </label>
+    <div id="controls-body">
+      <div class="control-grid">
+        <label>
+          <span>Board</span>
+          <input
+            id="grid-size"
+            type="number"
+            min="${MIN_GRID_SIZE}"
+            max="${MAX_GRID_SIZE}"
+            step="64"
+            value="${initialConfig.gridSize}"
+          >
+        </label>
+        <div class="piece-count-control">
+          <span>Pieces</span>
+          <div class="piece-count-actions">
+            <button id="remove-piece" class="secondary-button piece-count-button" type="button" aria-label="Remove piece">-</button>
+            <output id="piece-count" aria-live="polite">${initialConfig.pieces.length}</output>
+            <button id="add-piece" class="secondary-button piece-count-button" type="button" aria-label="Add piece">+</button>
+          </div>
+        </div>
+      </div>
+      <div id="piece-controls"></div>
+      <button id="reset-simulation" type="submit">Reset Simulation</button>
     </div>
-    <div id="piece-controls"></div>
-    <button id="reset-simulation" type="submit">Reset Simulation</button>
   `;
   document.body.appendChild(form);
 
   const gridSizeInput = document.getElementById('grid-size') as HTMLInputElement;
-  const pieceCountInput = document.getElementById('piece-count') as HTMLInputElement;
+  const controlsBody = document.getElementById('controls-body') as HTMLDivElement;
+  const toggleControlsButton = document.getElementById('toggle-controls') as HTMLButtonElement;
+  const pieceCountOutput = document.getElementById('piece-count') as HTMLOutputElement;
+  const removePieceButton = document.getElementById('remove-piece') as HTMLButtonElement;
+  const addPieceButton = document.getElementById('add-piece') as HTMLButtonElement;
   const pieceControls = document.getElementById('piece-controls') as HTMLDivElement;
   const resetButton = document.getElementById('reset-simulation') as HTMLButtonElement;
+  let pieceCount = initialConfig.pieces.length;
 
   const readConfig = (): FormConfig => {
     const gridSize = clampInteger(Number(gridSizeInput.value), MIN_GRID_SIZE, MAX_GRID_SIZE, DEFAULT_GRID_SIZE);
-    const pieceCount = getPieceCount(pieceCountInput);
     gridSizeInput.value = String(gridSize);
-    pieceCountInput.value = String(pieceCount);
 
     return {
       gridSize,
@@ -254,12 +262,24 @@ export function createControls(): Controls {
     };
   };
 
+  const updatePieceCountButtons = () => {
+    pieceCountOutput.value = String(pieceCount);
+    pieceCountOutput.textContent = String(pieceCount);
+    removePieceButton.disabled = pieceCount <= MIN_PIECES;
+    addPieceButton.disabled = pieceCount >= MAX_PIECES;
+  };
+
   const renderPieceControls = (pieceConfigs?: PieceFormConfig[]) => {
-    const pieceCount = getPieceCount(pieceCountInput);
-    pieceCountInput.value = String(pieceCount);
     const configs = Array.from(
       { length: pieceCount },
-      (_, index) => pieceConfigs?.[index] ?? readPieceFormConfig(index + 1, pieceCount),
+      (_, index) => {
+        const pieceId = index + 1;
+        const config = pieceConfigs?.[index] ?? readPieceFormConfig(pieceId, pieceCount);
+        return {
+          ...config,
+          attackedBy: normalizeAttackedBy(config.attackedBy, pieceId, pieceCount),
+        };
+      },
     );
 
     pieceControls.innerHTML = configs.map((config, index) => {
@@ -295,15 +315,52 @@ export function createControls(): Controls {
         </fieldset>
       `;
     }).join('');
+    updatePieceCountButtons();
   };
 
-  pieceCountInput.addEventListener('input', () => {
-    renderPieceControls();
+  const setCollapsed = (isCollapsed: boolean) => {
+    form.classList.toggle('is-collapsed', isCollapsed);
+    controlsBody.hidden = isCollapsed;
+    toggleControlsButton.textContent = isCollapsed ? 'Show' : 'Hide';
+    toggleControlsButton.setAttribute('aria-expanded', String(!isCollapsed));
+  };
+
+  const updatePieceCount = (nextPieceCount: number) => {
+    const previousPieceCount = pieceCount;
+    const currentConfigs = Array.from(
+      { length: previousPieceCount },
+      (_, index) => readPieceFormConfig(index + 1, previousPieceCount),
+    );
+    pieceCount = clampInteger(nextPieceCount, MIN_PIECES, MAX_PIECES, pieceCount);
+    const configs = Array.from(
+      { length: pieceCount },
+      (_, index) => {
+        const pieceId = index + 1;
+        const config = currentConfigs[index] ?? defaultPieceConfig(pieceId, pieceCount);
+        const addedAttackerIds = pieceCount > previousPieceCount
+          ? Array.from(
+            { length: pieceCount - previousPieceCount },
+            (_, addedIndex) => previousPieceCount + addedIndex + 1,
+          )
+          : [];
+        return {
+          ...config,
+          attackedBy: normalizeAttackedBy([...config.attackedBy, ...addedAttackerIds], pieceId, pieceCount),
+        };
+      },
+    );
+
+    renderPieceControls(configs);
     writeFormConfigToUrl(readConfig());
-  });
+  };
+
+  toggleControlsButton.addEventListener('click', () => setCollapsed(!form.classList.contains('is-collapsed')));
+  removePieceButton.addEventListener('click', () => updatePieceCount(pieceCount - 1));
+  addPieceButton.addEventListener('click', () => updatePieceCount(pieceCount + 1));
   form.addEventListener('change', () => writeFormConfigToUrl(readConfig()));
 
   renderPieceControls(initialConfig.pieces);
+  setCollapsed(window.matchMedia('(max-width: 700px)').matches);
 
   return {
     form,
