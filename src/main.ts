@@ -1,35 +1,36 @@
-import { makeNeighborsFunction, makeIsAttackedByFunction } from './pieces';
+import { createControls, PIECE_MOVES } from './controls.ts';
 import { Engine } from './engine.ts';
+import { makeNeighborsFunction, makeIsAttackedByFunction } from './pieces';
 
-const engine = new Engine(document.getElementById('canvas') as HTMLCanvasElement, {
-  gridSize: 2048,
-  placementsPerFrame: 10_000,
-  pieces: [
-    {
-      id: 1,
-      color: 0xff3333,
-      getNeighbors: makeNeighborsFunction([2, 1]),
-      isAttackedBy: makeIsAttackedByFunction([2]),
-    },
-    {
-      id: 2,
-      color: 0x3366ff,
-      getNeighbors: makeNeighborsFunction([2, 1]),
-      isAttackedBy: makeIsAttackedByFunction([1]),
-    },
-    /*{
-      id: 3,
-      color: 0x44aa00,
-      getNeighbors: makeNeighborsFunction([2, 1]),
-      isAttackedBy: makeIsAttackedByFunction([1, 2]),
-    },*/
-  ],
-});
+const canvas = document.getElementById('canvas');
+if (!(canvas instanceof HTMLCanvasElement)) {
+  throw new Error('Canvas element not found');
+}
+const canvasElement = canvas;
 
-try {
-  await engine.start();
-  console.log('Engine initialized');
-} catch (error) {
+const PLACEMENTS_PER_FRAME = 10_000;
+const controls = createControls();
+let engine: Engine | null = null;
+
+function makeEngine() {
+  const config = controls.readConfig();
+  controls.writeConfigToUrl(config);
+  return new Engine(canvasElement, {
+    gridSize: config.gridSize,
+    placementsPerFrame: PLACEMENTS_PER_FRAME,
+    pieces: config.pieces.map((pieceConfig, index) => {
+      const delta = PIECE_MOVES[pieceConfig.moveKey];
+      return {
+        id: index + 1,
+        color: pieceConfig.color,
+        getNeighbors: makeNeighborsFunction([delta[0], delta[1]]),
+        isAttackedBy: makeIsAttackedByFunction(pieceConfig.attackedBy),
+      };
+    }),
+  });
+}
+
+function showInitializationError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   console.error('Error initializing engine:', error);
   document.body.innerHTML = `
@@ -40,3 +41,26 @@ try {
     </div>
   `;
 }
+
+async function resetSimulation() {
+  controls.resetButton.disabled = true;
+  try {
+    if (engine) {
+      await engine.destroy();
+    }
+    engine = makeEngine();
+    await engine.start();
+    console.log('Engine initialized');
+  } catch (error) {
+    showInitializationError(error);
+  } finally {
+    controls.resetButton.disabled = false;
+  }
+}
+
+controls.form.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void resetSimulation();
+});
+
+await resetSimulation();

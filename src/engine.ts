@@ -1,11 +1,11 @@
 import {
-  centerRefToSpiralRef,
+  centerRefToTopLeftRef,
   spiralRefToCenterRef,
-  centerRefToFlatIndex,
   maxSpiralIndexForGrid,
 } from './coords.ts';
 
 import type { Piece } from './pieces';
+import type { CenterRef } from './coords';
 
 const BACKGROUND_COLOR = 0x1a1a1a;
 
@@ -16,10 +16,8 @@ export type EngineState = {
   // the next index that each piece can access (not occupied by opponent pieces)
   // and not attacked by opponent pieces
   nextSpiralIndexPerPiece: Map<number, number>;
-  // attacked by map
-  // the key is the spiral index, the values is the set of pieces ids that
-  // are attacking this spiral index
-  attackedByMap: Map<number, Set<number>>;
+  exhaustedPieceIds: Set<number>;
+  isComplete: boolean;
 }
 
 export type EngineConfig = {
@@ -36,32 +34,57 @@ function writeCellColor(cells: Uint8ClampedArray<ArrayBuffer>, flatIndex: number
   cells[offset + 3] = 255;
 }
 
+function centerRefToValidFlatIndex(centerRef: CenterRef, gridSize: number): number | null {
+  const topLeftRef = centerRefToTopLeftRef(centerRef, gridSize);
+  if (
+    topLeftRef.x < 0 ||
+    topLeftRef.x >= gridSize ||
+    topLeftRef.y < 0 ||
+    topLeftRef.y >= gridSize
+  ) {
+    return null;
+  }
+
+  return topLeftRef.y * gridSize + topLeftRef.x;
+}
+
+function pieceIdToAttackMask(pieceId: number) {
+  if (pieceId < 1 || pieceId > 32) {
+    throw new Error(`Piece id ${pieceId} cannot be stored in the attack mask`);
+  }
+  return 2 ** (pieceId - 1);
+}
+
+function isAttackedByMask(piece: Piece, attackedByMask: number) {
+  if (attackedByMask === 0) {
+    return false;
+  }
+
+  for (let attackerId = 1; attackerId <= 32; attackerId++) {
+    if ((attackedByMask & pieceIdToAttackMask(attackerId)) !== 0 && piece.isAttackedBy(attackerId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 function isSpiralValidForPiece(
   spiralIndex: number,
   piece: Piece,
   occupied: Uint8Array,
   gridSize: number,
-  attackedByMap: Map<number, Set<number>>,
+  attackedByMasks: Uint32Array,
 ): boolean {
   const centerRef = spiralRefToCenterRef(spiralIndex);
-  const flatIndex = centerRefToFlatIndex(centerRef, gridSize);
-  if (flatIndex < 0 || flatIndex >= occupied.length) {
+  const flatIndex = centerRefToValidFlatIndex(centerRef, gridSize);
+  if (flatIndex === null) {
     return false;
   }
   if (occupied[flatIndex] !== 0) {
     return false;
   }
-  const attackedBy = attackedByMap.get(spiralIndex);
-  if (!attackedBy || attackedBy.size === 0) {
-    return true;
-  }
-  for (const attackerId of attackedBy) {
-    if (piece.isAttackedBy(attackerId)) {
-      return false;
-    }
-  }
-  return true;
+  return !isAttackedByMask(piece, attackedByMasks[flatIndex]);
 }
 
 function advanceSpiralIndexForPiece(
@@ -69,12 +92,12 @@ function advanceSpiralIndexForPiece(
   fromSpiralIndex: number,
   occupied: Uint8Array,
   gridSize: number,
-  attackedByMap: Map<number, Set<number>>,
+  attackedByMasks: Uint32Array,
   maxSpiralIndex: number,
 ): number | null {
   let next = fromSpiralIndex;
   while (next++ <= maxSpiralIndex) {
-    if (isSpiralValidForPiece(next, piece, occupied, gridSize, attackedByMap)) {
+    if (isSpiralValidForPiece(next, piece, occupied, gridSize, attackedByMasks)) {
       return next;
     }
   }
@@ -118,6 +141,8 @@ export class Engine {
   private dirtyRows!: Uint8Array<ArrayBuffer>;
   // sim occupancy only — separate from color so background fills don't block placement
   private occupied!: Uint8Array<ArrayBuffer>;
+  // Per-board-cell bit mask of piece ids attacking that cell.
+  private attackedByMasks!: Uint32Array<ArrayBuffer>;
 
   constructor(htmlCanvas: HTMLCanvasElement, config: EngineConfig) {
     this.canvas = htmlCanvas;
@@ -127,7 +152,8 @@ export class Engine {
       pieceToPlaceNext: 0,
       frameCount: 0,
       nextSpiralIndexPerPiece: new Map(),
-      attackedByMap: new Map(),
+      exhaustedPieceIds: new Set(),
+      isComplete: false,
     };
 
     this.config.pieces.forEach((piece) => {
@@ -152,6 +178,7 @@ export class Engine {
     this.cells = new Uint8ClampedArray(pixelCount * 4);
     this.dirtyRows = new Uint8Array(gridSize);
     this.occupied = new Uint8Array(pixelCount);
+    this.attackedByMasks = new Uint32Array(pixelCount);
     for (let i = 0; i < pixelCount; i++) {
       writeCellColor(this.cells, i, BACKGROUND_COLOR);
     }
@@ -212,25 +239,58 @@ export class Engine {
     dirtyRows.fill(0);
   }
 
-  private placeNextPiece() {
+  private markPieceExhausted(pieceId: number) {
+    this.state.exhaustedPieceIds.add(pieceId);
+    if (this.state.exhaustedPieceIds.size >= this.config.pieces.length) {
+      this.state.isComplete = true;
+    }
+  }
+
+  private advancePieceTurn() {
+    if (this.state.isComplete) {
+      return;
+    }
+
+    for (let offset = 1; offset <= this.config.pieces.length; offset++) {
+      const nextIndex = (this.state.pieceToPlaceNext + offset) % this.config.pieces.length;
+      const piece = this.config.pieces[nextIndex];
+      if (!this.state.exhaustedPieceIds.has(piece.id)) {
+        this.state.pieceToPlaceNext = nextIndex;
+        return;
+      }
+    }
+
+    this.state.isComplete = true;
+  }
+
+  private placeNextPiece(): boolean {
     const pieceToPlaceNext = this.config.pieces[this.state.pieceToPlaceNext];
-    const nextSpiralIndex = this.state.nextSpiralIndexPerPiece.get(pieceToPlaceNext.id)!;
+    if (this.state.exhaustedPieceIds.has(pieceToPlaceNext.id)) {
+      return false;
+    }
+    const nextSpiralIndex = this.state.nextSpiralIndexPerPiece.get(pieceToPlaceNext.id);
+    if (nextSpiralIndex === undefined) {
+      this.markPieceExhausted(pieceToPlaceNext.id);
+      return false;
+    }
 
     // place the piece on this index
     const centerRef = spiralRefToCenterRef(nextSpiralIndex);
-    const nextFlatIndex = centerRefToFlatIndex(centerRef, this.config.gridSize);
+    const nextFlatIndex = centerRefToValidFlatIndex(centerRef, this.config.gridSize);
+    if (nextFlatIndex === null) {
+      this.markPieceExhausted(pieceToPlaceNext.id);
+      return false;
+    }
     this.setCellColor(nextFlatIndex, pieceToPlaceNext.color);
     this.occupied[nextFlatIndex] = 1;
 
 
-    // update the attacked by map using the piece's neighbors
+    // Update attack masks only for cells that are actually on the board.
+    const attackMask = pieceIdToAttackMask(pieceToPlaceNext.id);
     pieceToPlaceNext.getNeighbors(centerRef).forEach((neighbor) => {
-      const spiralIndex = centerRefToSpiralRef(neighbor);
-      const attackedBy = this.state.attackedByMap.get(spiralIndex);
-      if (attackedBy) {
-        attackedBy.add(pieceToPlaceNext.id);
-      } else {
-        this.state.attackedByMap.set(spiralIndex, new Set([pieceToPlaceNext.id]));
+      const flatIndex = centerRefToValidFlatIndex(neighbor, this.config.gridSize);
+      if (flatIndex !== null) {
+        this.attackedByMasks[flatIndex] |= attackMask;
       }
     })
 
@@ -240,11 +300,13 @@ export class Engine {
       nextSpiralIndex,
       this.occupied,
       this.config.gridSize,
-      this.state.attackedByMap,
+      this.attackedByMasks,
       this.maxSpiralIndex,
     );
     if (nextForPlacedPiece !== null) {
       this.state.nextSpiralIndexPerPiece.set(pieceToPlaceNext.id, nextForPlacedPiece);
+    } else {
+      this.markPieceExhausted(pieceToPlaceNext.id);
     }
 
     // other pieces keep their current target if it is still valid; only
@@ -253,13 +315,16 @@ export class Engine {
       if (piece.id === pieceToPlaceNext.id) {
         return;
       }
+      if (this.state.exhaustedPieceIds.has(piece.id)) {
+        return;
+      }
       const currentSpiralIndex = this.state.nextSpiralIndexPerPiece.get(piece.id)!;
       if (isSpiralValidForPiece(
         currentSpiralIndex,
         piece,
         this.occupied,
         this.config.gridSize,
-        this.state.attackedByMap,
+        this.attackedByMasks,
       )) {
         return;
       }
@@ -268,25 +333,31 @@ export class Engine {
         currentSpiralIndex,
         this.occupied,
         this.config.gridSize,
-        this.state.attackedByMap,
+        this.attackedByMasks,
         this.maxSpiralIndex,
       );
       if (nextForPiece !== null) {
         this.state.nextSpiralIndexPerPiece.set(piece.id, nextForPiece);
+      } else {
+        this.markPieceExhausted(piece.id);
       }
     });
 
-
+    return true;
   }
 
   update() {
+    if (this.state.isComplete) {
+      return;
+    }
 
     this.state.frameCount++;
 
-    for (let i = 0; i < this.config.placementsPerFrame; i++) {
-      this.placeNextPiece();
-      this.state.pieceToPlaceNext = (this.state.pieceToPlaceNext + 1) % this.config.pieces.length;
-      this.state.placementsCompleted++;
+    for (let i = 0; i < this.config.placementsPerFrame && !this.state.isComplete; i++) {
+      if (this.placeNextPiece()) {
+        this.state.placementsCompleted++;
+      }
+      this.advancePieceTurn();
     }
   }
 
@@ -306,7 +377,9 @@ export class Engine {
   async start() {
     await this.initialize();
     const loop = () => {
-      this.update();
+      if (!this.state.isComplete) {
+        this.update();
+      }
       this.render();
       this.requestAnimationFrameId = requestAnimationFrame(loop);
     }
