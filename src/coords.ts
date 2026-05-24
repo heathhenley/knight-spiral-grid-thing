@@ -67,8 +67,9 @@ export function centerRefToSpiralRef({ x, y }: CenterRef): number {
   return base + 6 * n + (x - (-n + 1));
 }
 
-/** Highest spiral index used by any cell on the grid. */
 export function maxSpiralIndexForGrid(gridSize: number): number {
+  // TODO it has to be one of the corners, so this could be simplified
+  // is it always the same one?
   let max = 0;
   for (let idx = 0; idx < gridSize * gridSize; idx++) {
     max = Math.max(max, centerRefToSpiralRef(flatIndexToCenterRef(idx, gridSize)));

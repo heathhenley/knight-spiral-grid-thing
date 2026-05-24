@@ -1,11 +1,13 @@
 import { Engine } from './engine.ts';
 
 const engine = new Engine(document.getElementById('canvas') as HTMLCanvasElement, {
-  gridSize: 512,
-  placementsPerFrame: 100,
+  gridSize: 2048,
+  placementsPerFrame: 10_000,
   pieces: [
-    { type: 'knight', delta: [2, 1], id: 1, color: 0xff3333 },
-    { type: 'knight', delta: [2, 1], id: 2, color: 0x3366ff },
+    { type: 'knight', delta: [2, 2], id: 1, color: 0xff3333 },
+    { type: 'knight', delta: [3, 0], id: 2, color: 0x3366ff },
+    //{ type: 'knight', delta: [3, 3], id: 3, color: 0x44aa00 },
+    //{ type: 'knight', delta: [7, 3], id: 4, color: 0x66ff00 },
   ],
 });
 

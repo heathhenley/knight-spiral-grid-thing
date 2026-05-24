@@ -1,4 +1,10 @@
-import { centerRefToSpiralRef, spiralRefToCenterRef, maxSpiralIndexForGrid, type CenterRef, centerRefToFlatIndex } from './coords.ts';
+import {
+  centerRefToSpiralRef,
+  spiralRefToCenterRef,
+  type CenterRef,
+  centerRefToFlatIndex,
+  maxSpiralIndexForGrid,
+} from './coords.ts';
 
 const PIXEL_SHADER_WGSL = /* wgsl */ `
 struct VertexOut {
@@ -108,10 +114,10 @@ function advanceSpiralIndexForPiece(
   occupied: Uint8Array,
   gridSize: number,
   attackedByMap: Map<number, Set<number>>,
+  maxSpiralIndex: number,
 ): number | null {
-  const maxSpiral = maxSpiralIndexForGrid(gridSize);
   let next = fromSpiralIndex;
-  while (next++ <= maxSpiral) {
+  while (next++ <= maxSpiralIndex) {
     if (isSpiralValidForPiece(next, piece, occupied, gridSize, attackedByMap)) {
       return next;
     }
@@ -147,6 +153,7 @@ export class Engine {
   private requestAnimationFrameId: number | null = null;
   private onResize = () => this.resizeCanvas();
 
+
   private canvasFormat!: GPUTextureFormat;
   private pixelTexture!: GPUTexture;
   private pixelSampler!: GPUSampler;
@@ -154,6 +161,7 @@ export class Engine {
   private pipeline!: GPURenderPipeline;
   private uploadBuffer!: Uint8Array<ArrayBuffer>;
   private rowBytes!: number;
+  private maxSpiralIndex!: number;
 
   private state: EngineState;
   private config: EngineConfig;
@@ -206,6 +214,9 @@ export class Engine {
 
     const { gridSize } = this.config;
     const pixelCount = gridSize * gridSize;
+
+    // cache this because naive implementation is slow (fix later)
+    this.maxSpiralIndex = maxSpiralIndexForGrid(gridSize);
 
     this.cells = new Uint8Array(pixelCount * 4);
     this.dirtyRows = new Uint8Array(gridSize);
@@ -395,6 +406,7 @@ export class Engine {
         this.occupied,
         this.config.gridSize,
         this.state.attackedByMap,
+        this.maxSpiralIndex,
       );
       if (nextForPlacedPiece !== null) {
         this.state.nextSpiralIndexPerPiece.set(pieceToPlaceNext.id, nextForPlacedPiece);
@@ -422,6 +434,7 @@ export class Engine {
           this.occupied,
           this.config.gridSize,
           this.state.attackedByMap,
+          this.maxSpiralIndex,
         );
         if (nextForPiece !== null) {
           this.state.nextSpiralIndexPerPiece.set(piece.id, nextForPiece);
