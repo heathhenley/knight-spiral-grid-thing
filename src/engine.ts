@@ -95,6 +95,18 @@ export class Engine {
   private imageData!: ImageData;
   private requestAnimationFrameId: number | null = null;
   private onResize = () => this.resizeCanvas();
+  private onPointerDown = (event: PointerEvent) => this.startPan(event);
+  private onPointerMove = (event: PointerEvent) => this.pan(event);
+  private onPointerUp = (event: PointerEvent) => this.endPan(event);
+  private onWheel = (event: WheelEvent) => this.zoom(event);
+
+  private viewScale = 1;
+  private viewOffsetX = 0;
+  private viewOffsetY = 0;
+  private isPanning = false;
+  private lastPointerX = 0;
+  private lastPointerY = 0;
+  private hasCustomView = false;
 
   private maxSpiralIndex!: number;
 
@@ -158,6 +170,11 @@ export class Engine {
 
     this.resizeCanvas();
     window.addEventListener('resize', this.onResize);
+    this.canvas.addEventListener('pointerdown', this.onPointerDown);
+    this.canvas.addEventListener('pointermove', this.onPointerMove);
+    this.canvas.addEventListener('pointerup', this.onPointerUp);
+    this.canvas.addEventListener('pointercancel', this.onPointerUp);
+    this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
   }
 
   private setCellColor(flatIndex: number, color: number) {
@@ -277,7 +294,13 @@ export class Engine {
     this.flushPixels();
     this.context.imageSmoothingEnabled = false;
     this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    this.context.drawImage(this.pixelCanvas, 0, 0, this.canvas.width, this.canvas.height);
+    this.context.drawImage(
+      this.pixelCanvas,
+      this.viewOffsetX,
+      this.viewOffsetY,
+      this.config.gridSize * this.viewScale,
+      this.config.gridSize * this.viewScale,
+    );
   }
 
   async start() {
@@ -300,11 +323,103 @@ export class Engine {
   async destroy() {
     this.stop();
     window.removeEventListener('resize', this.onResize);
+    this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+    this.canvas.removeEventListener('pointermove', this.onPointerMove);
+    this.canvas.removeEventListener('pointerup', this.onPointerUp);
+    this.canvas.removeEventListener('pointercancel', this.onPointerUp);
+    this.canvas.removeEventListener('wheel', this.onWheel);
   }
 
   private resizeCanvas() {
+    const previousCenter = this.canvasToBoardPoint(this.canvas.width / 2, this.canvas.height / 2);
     const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = Math.floor(window.innerWidth * dpr);
-    this.canvas.height = Math.floor(window.innerHeight * dpr);
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = Math.floor((rect.width || window.innerWidth) * dpr);
+    this.canvas.height = Math.floor((rect.height || window.innerHeight) * dpr);
+    this.context.imageSmoothingEnabled = false;
+
+    if (!this.hasCustomView || !previousCenter) {
+      this.resetViewToFillWidth();
+      return;
+    }
+
+    this.viewOffsetX = (this.canvas.width / 2) - previousCenter.x * this.viewScale;
+    this.viewOffsetY = (this.canvas.height / 2) - previousCenter.y * this.viewScale;
+  }
+
+  private resetViewToFillWidth() {
+    this.viewScale = this.canvas.width / this.config.gridSize;
+    this.viewOffsetX = (this.canvas.width - this.config.gridSize * this.viewScale) / 2;
+    this.viewOffsetY = (this.canvas.height - this.config.gridSize * this.viewScale) / 2;
+  }
+
+  private getCanvasPoint(event: PointerEvent | WheelEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * this.canvas.width,
+      y: ((event.clientY - rect.top) / rect.height) * this.canvas.height,
+    };
+  }
+
+  private canvasToBoardPoint(x: number, y: number) {
+    if (this.viewScale === 0) {
+      return null;
+    }
+    return {
+      x: (x - this.viewOffsetX) / this.viewScale,
+      y: (y - this.viewOffsetY) / this.viewScale,
+    };
+  }
+
+  private startPan(event: PointerEvent) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const point = this.getCanvasPoint(event);
+    this.isPanning = true;
+    this.hasCustomView = true;
+    this.lastPointerX = point.x;
+    this.lastPointerY = point.y;
+    this.canvas.setPointerCapture(event.pointerId);
+  }
+
+  private pan(event: PointerEvent) {
+    if (!this.isPanning) {
+      return;
+    }
+
+    const point = this.getCanvasPoint(event);
+    this.viewOffsetX += point.x - this.lastPointerX;
+    this.viewOffsetY += point.y - this.lastPointerY;
+    this.lastPointerX = point.x;
+    this.lastPointerY = point.y;
+  }
+
+  private endPan(event: PointerEvent) {
+    if (!this.isPanning) {
+      return;
+    }
+
+    this.isPanning = false;
+    this.canvas.releasePointerCapture(event.pointerId);
+  }
+
+  private zoom(event: WheelEvent) {
+    event.preventDefault();
+
+    const point = this.getCanvasPoint(event);
+    const boardPoint = this.canvasToBoardPoint(point.x, point.y);
+    if (!boardPoint) {
+      return;
+    }
+
+    const zoomFactor = Math.exp(-event.deltaY * 0.001);
+    const minScale = Math.min(this.canvas.width, this.canvas.height) / this.config.gridSize / 8;
+    const maxScale = 128;
+    this.viewScale = Math.min(maxScale, Math.max(minScale, this.viewScale * zoomFactor));
+    this.viewOffsetX = point.x - boardPoint.x * this.viewScale;
+    this.viewOffsetY = point.y - boardPoint.y * this.viewScale;
+    this.hasCustomView = true;
   }
 }
