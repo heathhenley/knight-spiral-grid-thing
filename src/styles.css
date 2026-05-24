@@ -24,6 +24,51 @@ html, body {
   touch-action: none;
 }
 
+.github-link {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: rgb(255 255 255 / 72%);
+  background: rgb(14 16 20 / 46%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+  text-decoration: none;
+  backdrop-filter: blur(6px);
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+  opacity: 0.72;
+}
+
+.github-link:hover,
+.github-link:focus-visible {
+  color: #fff;
+  background: rgb(14 16 20 / 68%);
+  border-color: rgb(255 255 255 / 28%);
+  opacity: 1;
+}
+
+.github-link:focus-visible {
+  outline: 2px solid #8ab4ff;
+  outline-offset: 2px;
+}
+
+.github-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.github-link span {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
 #controls {
   position: absolute;
   top: 12px;
