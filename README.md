@@ -18,6 +18,6 @@ center reference coords to spiral index and vice versa.
 
 Here's a couple that I like:
 - [5 colors](https://heathhenley.dev/knight-spiral-grid-thing/?size=4096&pieces=5&moves=Knight%2CAntelope%2CKnight%2CSatrap%2CZebra&attacks=2%2C3%2C4%2C5%7C1%2C3%2C4%2C5%7C1%2C2%2C4%2C5%7C1%2C2%2C3%2C5%7C1%2C2%2C3%2C4&colors=ff3333%2C3366ff%2C44aa00%2Cffaa00%2Caa55ff)
-- [from Jonas' examples](http://localhost:5174/?size=1024&pieces=2&moves=Knight%2CAntelope&attacks=2%7C1&colors=d51024%2C13c8ec)
+- [from Jonas' examples](https://heathhenley.dev/knight-spiral-grid-thing/?size=1024&pieces=2&moves=Knight%2CAntelope&attacks=2%7C1&colors=d51024%2C13c8ec)
 - [i like the repeating squares](https://heathhenley.dev/knight-spiral-grid-thing/?size=4096&pieces=3&moves=Knight%2CAntelope%2CEland&attacks=2%7C1%7C1%2C2&colors=ff3333%2C3366ff%2C44aa00)
 - [waves](https://heathhenley.dev/knight-spiral-grid-thing/?size=2048&pieces=5&moves=Knight%2CZebra%2CEland%2CMarzban%2CSpehbed&attacks=4%2C5%7C3%2C4%2C5%7C2%2C4%2C5%7C1%2C2%2C3%7C1%2C2%2C3&colors=ff3333%2C3366ff%2C44aa00%2Cc800ff%2Cf2cb07)
